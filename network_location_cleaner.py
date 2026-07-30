@@ -12,12 +12,15 @@
 나중에 필요할 때 "복원" 버튼으로 원래 위치에 그대로 되돌릴 수 있습니다.
 """
 
+import json
 import os
 import shutil
 import stat
 import sys
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
+
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), "network_location_cleaner_settings.json")
 
 # ---------- 다크 테마 색상 ----------
 BG = "#1e1e1e"
@@ -42,6 +45,22 @@ def get_active_dir() -> str:
 def get_backup_dir() -> str:
     appdata = os.environ.get("APPDATA")
     return os.path.join(appdata, "Microsoft", "Windows", "Network Shortcuts_Backup")
+
+
+def load_settings() -> dict:
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_settings(data: dict):
+    try:
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def _force_remove_readonly(func, path, exc_info):
@@ -110,7 +129,9 @@ class App(tk.Tk):
             self.active_dir = get_active_dir()
         except Exception as e:
             messagebox.showerror("오류", str(e))
-        self.backup_dir = get_backup_dir()
+        settings = load_settings()
+        saved_backup = settings.get("backup_dir")
+        self.backup_dir = saved_backup if saved_backup else get_backup_dir()
 
         self._build_style()
         self._build_ui()
@@ -203,8 +224,14 @@ class App(tk.Tk):
         backup_tab = ttk.Frame(notebook)
         notebook.add(backup_tab, text="보관함")
         self.backup_listbox = self._make_listbox(backup_tab)
-        self.backup_path_label = ttk.Label(backup_tab, text=self.backup_dir, style="Dim.TLabel", wraplength=540)
-        self.backup_path_label.pack(anchor="w", padx=4, pady=(4, 0))
+
+        path_row = ttk.Frame(backup_tab)
+        path_row.pack(fill="x", pady=(4, 0))
+        self.backup_path_label = ttk.Label(path_row, text=self.backup_dir, style="Dim.TLabel", wraplength=440)
+        self.backup_path_label.pack(side="left", anchor="w", padx=4, fill="x", expand=True)
+        ttk.Button(
+            path_row, text="폴더 변경", style="Plain.TButton", command=self.change_backup_dir
+        ).pack(side="right")
 
         backup_btns = ttk.Frame(backup_tab)
         backup_btns.pack(fill="x", pady=(8, 0))
@@ -238,10 +265,24 @@ class App(tk.Tk):
         lb.config(yscrollcommand=sb.set)
         return lb
 
+    # ---------- 보관 폴더 변경 ----------
+    def change_backup_dir(self):
+        chosen = filedialog.askdirectory(
+            title="보관함으로 사용할 폴더 선택",
+            initialdir=self.backup_dir if os.path.isdir(self.backup_dir) else os.path.expanduser("~"),
+        )
+        if not chosen:
+            return
+        self.backup_dir = os.path.normpath(chosen)
+        save_settings({"backup_dir": self.backup_dir})
+        self.backup_path_label.config(text=self.backup_dir)
+        self.refresh_all()
+
     # ---------- 목록 갱신 ----------
     def refresh_all(self):
         self._fill_listbox(self.active_listbox, self.active_dir)
         self._fill_listbox(self.backup_listbox, self.backup_dir)
+        self.backup_path_label.config(text=self.backup_dir)
         a = self.active_listbox.size()
         b = self.backup_listbox.size()
         self.status_var.set(f"현재 등록: {a}개  |  보관함: {b}개")
